@@ -130,7 +130,7 @@ static void browser_get_embedded_objects(browser_tp b, filegetter_tp fg, gint* o
 	g_slist_free_full(objs, NULL);
 }
 
-static browser_connection_tp browser_prepare_filegetter(browser_tp b, browser_server_args_tp http_server, browser_server_args_tp socks_proxy, gchar* filepath) {
+static browser_connection_tp browser_prepare_filegetter(browser_tp b, browser_server_args_tp http_server, gchar* filepath) {
 	assert(b);
 	
 	/* absolute file path to get from server */
@@ -153,15 +153,6 @@ static browser_connection_tp browser_prepare_filegetter(browser_tp b, browser_se
 		return NULL;
 	}
 
-	/* there may not be a socks proxy, so NULL is ok */
-	in_addr_t socks_addr = 0;
-	in_port_t socks_port = 0;
-	
-	if(socks_proxy != NULL) {
-		socks_addr = browser_getaddr(b, socks_proxy);
-		socks_port = htons((in_port_t) atoi(socks_proxy->port));
-	}
-
 	/* validation successful, let's create the actual connection */
 	browser_connection_tp conn = g_new0(browser_connection_t, 1);
 	strncpy(conn->fspec.remote_path, filepath, sizeof(conn->fspec.remote_path));
@@ -169,8 +160,13 @@ static browser_connection_tp browser_prepare_filegetter(browser_tp b, browser_se
 	conn->b = b;
 	conn->sspec.http_addr = http_addr;
 	conn->sspec.http_port = http_port;
-	conn->sspec.socks_addr = socks_addr;
-	conn->sspec.socks_port = socks_port;
+	
+	/* there may not be a socks proxy, so NULL is ok */
+	if(b->socks_proxy != NULL) {
+		conn->sspec.socks_addr = browser_getaddr(b, b->socks_proxy);;
+		conn->sspec.socks_port = htons((in_port_t) atoi(b->socks_proxy->port));;
+	}
+	
 	conn->sspec.persistent = TRUE; /* Always create persistent connections */
 	
 	if (b->state == SB_DOCUMENT) {
@@ -222,7 +218,7 @@ static void browser_start_tasks(gpointer key, gpointer value, gpointer user_data
 		http_server->port = "80";
 
 		/* Create a connection object and start establishing a connection */
-		browser_connection_tp conn =  browser_prepare_filegetter(b, http_server, b->socks_proxy, path);
+		browser_connection_tp conn =  browser_prepare_filegetter(b, http_server, path);
 		g_hash_table_insert(b->connections, &conn->fg.sockd, conn);
 		tasks->running++;
 		g_free(path);
@@ -343,13 +339,13 @@ gint browser_launch(browser_tp b, browser_args_tp args, gint epolld) {
 	/* Initialize the download tasks with the first hostname */
 	browser_init_host(b, b->first_hostname);
 
-	/* Create a connection object and start establishing a connection */
-	browser_connection_tp conn =  browser_prepare_filegetter(b, &args->http_server, &args->socks_proxy, args->document_path);
-
 	/* Save the socks proxy address and port for later use in other server specs */
 	b->socks_proxy = g_new0(browser_server_args_t, 1);
 	b->socks_proxy->host = g_strdup(args->socks_proxy.host);
 	b->socks_proxy->port = g_strdup(args->socks_proxy.port);
+	
+	/* Create a connection object and start establishing a connection */
+	browser_connection_tp conn =  browser_prepare_filegetter(b, &args->http_server, args->document_path);
 
 	/* Add the first connection for the document */
 	b->connections = g_hash_table_new_full(g_int_hash, g_int_equal, NULL, browser_shutdown_connection);
